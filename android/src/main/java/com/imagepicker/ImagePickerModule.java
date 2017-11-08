@@ -64,6 +64,7 @@ public class ImagePickerModule extends ReactContextBaseJavaModule
   public static final int REQUEST_LAUNCH_VIDEO_CAPTURE    = 13004;
   public static final int REQUEST_PERMISSIONS_FOR_CAMERA  = 14001;
   public static final int REQUEST_PERMISSIONS_FOR_LIBRARY = 14002;
+  public static final int REQUEST_LUNCH_MIXED_LIBRARY     = 15001;
 
   private final ReactApplicationContext reactContext;
   private final int dialogThemeId;
@@ -328,6 +329,12 @@ public class ImagePickerModule extends ReactContextBaseJavaModule
       libraryIntent = new Intent(Intent.ACTION_PICK);
       libraryIntent.setType("video/*");
     }
+    else if (pickBoth) {
+      requestCode = REQUEST_LUNCH_MIXED_LIBRARY;
+      libraryIntent = new Intent(Intent.ACTION_PICK,
+      MediaStore.Images.Media.EXTERNAL_CONTENT_URI);
+      libraryIntent.setType("image/* video/*");
+    }
     else
     {
       requestCode = REQUEST_LAUNCH_IMAGE_LIBRARY;
@@ -407,6 +414,12 @@ public class ImagePickerModule extends ReactContextBaseJavaModule
         break;
 
       case REQUEST_LAUNCH_VIDEO_LIBRARY:
+        responseHelper.putString("uri", data.getData().toString());
+        responseHelper.putString("path", getRealPathFromURI(data.getData()));
+        responseHelper.invokeResponse(callback);
+        callback = null;
+        return;
+      case REQUEST_LUNCH_MIXED_LIBRARY: 
         responseHelper.putString("uri", data.getData().toString());
         responseHelper.putString("path", getRealPathFromURI(data.getData()));
         responseHelper.invokeResponse(callback);
@@ -711,6 +724,9 @@ public class ImagePickerModule extends ReactContextBaseJavaModule
     pickVideo = false;
     if (options.hasKey("mediaType") && options.getString("mediaType").equals("video")) {
       pickVideo = true;
+    }
+    if (options.hasKey("mediaType") && options.getString("mediaType").equals("mixed")) {
+      pickBoth = true;
     }
     videoQuality = 1;
     if (options.hasKey("videoQuality") && options.getString("videoQuality").equals("low")) {
