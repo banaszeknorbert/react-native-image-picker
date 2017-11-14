@@ -6,10 +6,8 @@ import android.content.ActivityNotFoundException;
 import android.content.Context;
 import android.content.DialogInterface;
 import android.content.Intent;
-import android.content.pm.ResolveInfo;
 import android.graphics.BitmapFactory;
 import android.net.Uri;
-import android.os.Build;
 import android.provider.MediaStore;
 import android.provider.Settings;
 import android.support.annotation.NonNull;
@@ -22,6 +20,7 @@ import android.util.Base64;
 import android.util.Patterns;
 import android.webkit.MimeTypeMap;
 import android.content.pm.PackageManager;
+import android.util.Log;
 
 import com.facebook.react.ReactActivity;
 import com.facebook.react.bridge.ActivityEventListener;
@@ -46,7 +45,9 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
 import java.lang.ref.WeakReference;
-import java.util.List;
+
+import android.content.DialogInterface;
+import android.content.Intent;
 
 import com.facebook.react.modules.core.PermissionListener;
 
@@ -255,12 +256,7 @@ public class ImagePickerModule extends ReactContextBaseJavaModule
       final File original = createNewFile(reactContext, this.options, false);
       imageConfig = imageConfig.withOriginalFile(original);
 
-      if (imageConfig.original != null) {
-        cameraCaptureURI = RealPathUtil.compatUriFromFile(reactContext, imageConfig.original);
-      }else {
-        responseHelper.invokeError(callback, "Couldn't get file path for photo");
-        return;
-      }
+      cameraCaptureURI = RealPathUtil.compatUriFromFile(reactContext, imageConfig.original);
       if (cameraCaptureURI == null)
       {
         responseHelper.invokeError(callback, "Couldn't get file path for photo");
@@ -277,17 +273,6 @@ public class ImagePickerModule extends ReactContextBaseJavaModule
 
     this.callback = callback;
 
-    // Workaround for Android bug.
-    // grantUriPermission also needed for KITKAT,
-    // see https://code.google.com/p/android/issues/detail?id=76683
-    if (Build.VERSION.SDK_INT <= Build.VERSION_CODES.KITKAT) {
-      List<ResolveInfo> resInfoList = reactContext.getPackageManager().queryIntentActivities(cameraIntent, PackageManager.MATCH_DEFAULT_ONLY);
-      for (ResolveInfo resolveInfo : resInfoList) {
-        String packageName = resolveInfo.activityInfo.packageName;
-        reactContext.grantUriPermission(packageName, cameraCaptureURI, Intent.FLAG_GRANT_WRITE_URI_PERMISSION | Intent.FLAG_GRANT_READ_URI_PERMISSION);
-      }
-    }
-
     try
     {
       currentActivity.startActivityForResult(cameraIntent, requestCode);
@@ -303,6 +288,34 @@ public class ImagePickerModule extends ReactContextBaseJavaModule
   {
     this.launchImageLibrary(this.options, this.callback);
   }
+
+  private void showPickerDialog(final Callback callback)
+  {
+    this.callback = callback;
+    final CharSequence[] options = { "Obrazy", "Wideo", "Anuluj" };
+    AlertDialog.Builder builder = new AlertDialog.Builder(getActivity(), getDialogThemeId());
+    builder.setTitle("Wybierz z...");
+    builder.setItems(options, new DialogInterface.OnClickListener() {
+        @Override
+        public void onClick(DialogInterface dialog, int item) {
+            if (options[item].equals("Obrazy")) {
+                Intent intent = new Intent(Intent.ACTION_PICK, android.provider.MediaStore.Images.Media.EXTERNAL_CONTENT_URI);
+                intent.putExtra(Intent.EXTRA_ALLOW_MULTIPLE, false);
+                getCurrentActivity().startActivityForResult(intent, REQUEST_LAUNCH_IMAGE_LIBRARY);
+            } else if (options[item].equals("Wideo")) {
+                Intent intent = new Intent(Intent.ACTION_PICK);
+                intent.setType("video/*");
+                intent.putExtra(Intent.EXTRA_ALLOW_MULTIPLE, false);
+                getCurrentActivity().startActivityForResult(intent, REQUEST_LAUNCH_VIDEO_LIBRARY);
+            } else if (options[item].equals("Anuluj")) {
+                dialog.dismiss();
+            }
+            dialog.dismiss();
+        }
+    });
+    builder.show();
+  }
+
   // NOTE: Currently not reentrant / doesn't support concurrent requests
   @ReactMethod
   public void launchImageLibrary(final ReadableMap options, final Callback callback)
@@ -331,10 +344,8 @@ public class ImagePickerModule extends ReactContextBaseJavaModule
       libraryIntent.setType("video/*");
     }
     else if (pickBoth) {
-      requestCode = REQUEST_LUNCH_MIXED_LIBRARY;
-      libraryIntent = new Intent(Intent.ACTION_PICK,
-      MediaStore.Images.Media.EXTERNAL_CONTENT_URI);
-      libraryIntent.setType("image/* video/*");
+      showPickerDialog(callback);
+      return;
     }
     else
     {
@@ -364,6 +375,7 @@ public class ImagePickerModule extends ReactContextBaseJavaModule
 
   @Override
   public void onActivityResult(Activity activity, int requestCode, int resultCode, Intent data) {
+    Log.e("ImagePickerModule", "OnActivityResult: " + requestCode);
     //robustness code
     if (passResult(requestCode))
     {
@@ -371,7 +383,6 @@ public class ImagePickerModule extends ReactContextBaseJavaModule
     }
 
     responseHelper.cleanResponse();
-
     // user cancel
     if (resultCode != Activity.RESULT_OK)
     {
@@ -415,12 +426,6 @@ public class ImagePickerModule extends ReactContextBaseJavaModule
         break;
 
       case REQUEST_LAUNCH_VIDEO_LIBRARY:
-        responseHelper.putString("uri", data.getData().toString());
-        responseHelper.putString("path", getRealPathFromURI(data.getData()));
-        responseHelper.invokeResponse(callback);
-        callback = null;
-        return;
-      case REQUEST_LUNCH_MIXED_LIBRARY: 
         responseHelper.putString("uri", data.getData().toString());
         responseHelper.putString("path", getRealPathFromURI(data.getData()));
         responseHelper.invokeResponse(callback);
@@ -534,7 +539,8 @@ public class ImagePickerModule extends ReactContextBaseJavaModule
   {
     return callback == null || (cameraCaptureURI == null && requestCode == REQUEST_LAUNCH_IMAGE_CAPTURE)
             || (requestCode != REQUEST_LAUNCH_IMAGE_CAPTURE && requestCode != REQUEST_LAUNCH_IMAGE_LIBRARY
-            && requestCode != REQUEST_LAUNCH_VIDEO_LIBRARY && requestCode != REQUEST_LAUNCH_VIDEO_CAPTURE);
+            && requestCode != REQUEST_LAUNCH_VIDEO_LIBRARY && requestCode != REQUEST_LAUNCH_VIDEO_CAPTURE
+            && requestCode != REQUEST_LUNCH_MIXED_LIBRARY);
   }
 
   private void updatedResultResponse(@Nullable final Uri uri,
@@ -603,9 +609,7 @@ public class ImagePickerModule extends ReactContextBaseJavaModule
                     innerActivity.startActivityForResult(intent, 1);
                   }
                 });
-        if (dialog != null) {
-          dialog.show();
-        }
+        dialog.show();
         return false;
       }
       else
